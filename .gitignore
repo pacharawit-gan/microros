@@ -1,0 +1,23 @@
+# ROS / colcon output
+build/
+install/
+log/
+# Python generated files
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+# Local editor and environment files
+.vscode/
+.idea/
+.env
+.env.*
+*.swp
+*~
+# Recordings and local maps (curated maps may live in the package maps/)
+*.bag
+*.db3
+*.mcap
+maps_local/

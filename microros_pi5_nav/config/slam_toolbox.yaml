@@ -1,0 +1,110 @@
+# slam_toolbox - online asynchronous mapping for the MicroROS-Pi5 car.
+#
+#   ros2 launch microros_pi5_nav slam.launch.py
+#
+# "Asynchronous" = process the latest scan and drop any backlog, rather than
+# queueing every scan and falling behind. Correct for live mapping while driving.
+# The synchronous variant is for replaying a bag where you must not drop data.
+#
+# Tuned against the MEASURED MS200 (2026-08-31), not slam_toolbox's defaults:
+#   360 points over +/-pi, 1 deg increment, 0.12-8.0 m, ~10.8 Hz, BEST_EFFORT QoS.
+#
+# Two facts about this robot drive most of the non-default values below:
+#
+#   1. The chassis is small (0.20 x 0.17 m) and the lidar sees 8 m, so the robot
+#      moves a small fraction of a scan's footprint between updates. The travel
+#      thresholds are therefore lower than stock - stock values were picked for
+#      larger robots and would leave visible gaps in a room this size.
+#
+#   2. Odometry is integrated on the ESP32 with firmware constants we cannot
+#      change, and its scale error is unmeasured. So scan matching has to carry
+#      more of the load than usual: the correlation search space is widened and
+#      loop closure is left on with a permissive threshold.
+
+slam_toolbox:
+  ros__parameters:
+
+    # ---- plugins ---------------------------------------------------------------
+    solver_plugin: solver_plugins::CeresSolver
+    ceres_linear_solver: SPARSE_NORMAL_CHOLESKY
+    ceres_preconditioner: SCHUR_JACOBI
+    ceres_trust_strategy: LEVENBERG_MARQUARDT
+    ceres_dogleg_type: TRADITIONAL_DOGLEG
+    ceres_loss_function: None
+
+    # ---- frames and topics -----------------------------------------------------
+    # base_frame is base_footprint, NOT base_link - the ground projection is the
+    # navigation root (REP-105) and it is what odom_republisher publishes TF to.
+    odom_frame: odom
+    map_frame: map
+    base_frame: base_footprint
+    scan_topic: /scan
+    use_map_saver: true
+    mode: mapping
+
+    debug_logging: false
+    throttle_scans: 1
+    transform_publish_period: 0.02      # 50 Hz map->odom; Nav2 wants this brisk
+    map_update_interval: 1.0            # s. Low so the map fills in visibly while
+                                        # you drive. Raise if the CPU struggles.
+    resolution: 0.05                    # m/cell. 5 cm is the Nav2 convention.
+
+    # Must match the lidar's real range_min/range_max. Set max higher and
+    # slam_toolbox trusts returns the sensor never produces; lower and you throw
+    # away good data. Leaving min_laser_range unset defaults it to 0.0, which
+    # makes slam_toolbox log "minimum laser range setting (0.0 m) exceeds the
+    # capabilities of the used Lidar" and clip it for you - harmless, but state
+    # the real value rather than relying on the clip.
+    min_laser_range: 0.12
+    max_laser_range: 8.0
+
+    minimum_time_interval: 0.2          # s between processed scans (lidar is 10.8 Hz)
+    transform_timeout: 0.2
+    tf_buffer_duration: 30.0
+    stack_size_to_use: 40000000         # bytes; serialising a large map needs it
+    enable_interactive_mode: true
+
+    # ---- when to add a new node to the pose graph -------------------------------
+    # Lower than stock (0.5 m / 0.5 rad) because this robot is small and indoor
+    # runs are short - at stock values a whole room can pass with only a handful
+    # of nodes and loop closure has nothing to work with.
+    minimum_travel_distance: 0.15       # m
+    minimum_travel_heading: 0.15        # rad (~8.6 deg)
+
+    # ---- scan matching ----------------------------------------------------------
+    use_scan_matching: true
+    use_scan_barycenter: true
+    scan_buffer_size: 10
+    scan_buffer_maximum_scan_distance: 10.0
+    link_match_minimum_response_fine: 0.1
+    link_scan_maximum_distance: 1.5
+
+    # ---- loop closure -----------------------------------------------------------
+    do_loop_closing: true
+    loop_search_maximum_distance: 3.0
+    loop_match_minimum_chain_size: 10
+    loop_match_maximum_variance_coarse: 3.0
+    loop_match_minimum_response_coarse: 0.35
+    loop_match_minimum_response_fine: 0.45
+
+    # ---- correlation search (matching a scan against the map) --------------------
+    # 0.5 m of search space rather than the stock 0.3, because uncalibrated wheel
+    # odometry hands the matcher a worse initial guess than it expects.
+    correlation_search_space_dimension: 0.5
+    correlation_search_space_resolution: 0.01
+    correlation_search_space_smear_deviation: 0.1
+
+    # ---- correlation search for loop closure -------------------------------------
+    loop_search_space_dimension: 8.0
+    loop_search_space_resolution: 0.05
+    loop_search_space_smear_deviation: 0.03
+
+    # ---- scan matcher penalties --------------------------------------------------
+    distance_variance_penalty: 0.5
+    angle_variance_penalty: 1.0
+    fine_search_angle_offset: 0.00349     # rad
+    coarse_search_angle_offset: 0.349     # rad
+    coarse_angle_resolution: 0.0349       # rad
+    minimum_angle_penalty: 0.9
+    minimum_distance_penalty: 0.5
+    use_response_expansion: true

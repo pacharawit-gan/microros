@@ -1,0 +1,31 @@
+# Parameters for the fake ESP32 control board.
+#
+# Defaults give a clean, well-behaved robot. Turn on the imperfections one at a time when
+# you want to prove the stack survives them - that is the whole point of having a sim.
+
+fake_board:
+  ros__parameters:
+    # The hardware boundary. Change these only if your real firmware differs.
+    cmd_vel_topic: cmd_vel
+    odom_topic: odom_raw
+    imu_topic: imu
+    publish_rate: 20.0        # Hz - matches the real board
+    odom_frame: odom
+    base_frame: base_footprint
+
+    # Plant model
+    velocity_tau: 0.15        # s, first-order motor lag. 0.0 = instant (unrealistic)
+    max_linear_x: 1.0         # m/s, hardware ceiling (above cmd_vel_safety's 0.5 limit,
+                              #      so you can see the limiter actually doing something)
+    max_angular_z: 3.0        # rad/s
+    cmd_timeout: 1.0          # s. Set 0.0 to reproduce the real board's behaviour of
+                              #    holding the last command forever.
+
+    # ---- imperfections: all zero = perfect robot ----------------------------------
+    linear_noise_std: 0.0     # m/s   wheel slip / encoder noise
+    angular_noise_std: 0.0    # rad/s
+    imu_noise_std: 0.0        # rad/s gyro noise
+    clock_offset: 0.0         # s     added to published stamps. Try 5.0 to reproduce the
+                              #       unsynchronised-ESP32 bug and watch tf2 reject
+                              #       transforms "in the future" - then note that
+                              #       odom_republisher's stamp_with_ros_time saves you.

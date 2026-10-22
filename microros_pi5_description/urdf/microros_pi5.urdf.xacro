@@ -1,0 +1,274 @@
+<?xml version="1.0"?>
+<!--
+  Yahboom MicroROS-Pi5 4WD robot car.
+
+  Frame convention (REP-103 / REP-105):
+    base_footprint  -> ground projection of the robot origin, navigation root
+    base_link       -> chassis origin, one wheel radius above base_footprint
+    x forward, y left, z up
+
+  Wheel joint names are the English equivalents of Yahboom's pinyin names:
+    front_left  = zq_Joint   front_right = yq_Joint
+    rear_right  = yh_Joint   rear_left   = zh_Joint
+
+  !! MEASURE ME !!  Every dimension below is a documented estimate for the stock car.
+  Take a caliper to your robot and correct the properties in the block marked
+  "PHYSICAL PARAMETERS" before you trust odometry, footprint or lidar placement.
+-->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="microros_pi5">
+
+  <xacro:include filename="$(find microros_pi5_description)/urdf/inertial_macros.xacro"/>
+
+  <!-- ================================================================= -->
+  <!--  PHYSICAL PARAMETERS   (single source of truth - edit here only)  -->
+  <!-- ================================================================= -->
+
+  <!-- Chassis (aluminium plate stack, lidar and Pi excluded) -->
+  <xacro:property name="base_length" value="0.200"/>   <!-- x -->
+  <xacro:property name="base_width"  value="0.170"/>   <!-- y -->
+  <xacro:property name="base_height" value="0.055"/>   <!-- z -->
+  <xacro:property name="base_mass"   value="1.500"/>
+
+  <!-- Wheels: 65 mm diameter rubber tyre on a 370 encoder motor -->
+  <xacro:property name="wheel_radius" value="0.0325"/>
+  <xacro:property name="wheel_width"  value="0.0270"/>
+  <xacro:property name="wheel_mass"   value="0.100"/>
+
+  <!-- Track (left-right centre distance) and wheelbase (front-rear centre distance).
+       These two numbers ARE your odometry calibration - get them right. -->
+  <xacro:property name="wheel_separation" value="0.180"/>
+  <xacro:property name="wheel_base"       value="0.150"/>
+
+  <!-- Sensor mounting offsets, relative to base_link -->
+  <xacro:property name="lidar_xyz"  value="0.0 0.0 0.090"/>
+  <xacro:property name="imu_xyz"    value="0.0 0.0 0.010"/>
+  <xacro:property name="gimbal_xyz" value="0.075 0.0 0.045"/>
+
+  <!-- Derived -->
+  <xacro:property name="half_track" value="${wheel_separation / 2.0}"/>
+  <xacro:property name="half_base"  value="${wheel_base / 2.0}"/>
+  <xacro:property name="PI"         value="3.14159265359"/>
+
+  <!-- ================================================================= -->
+  <!--  MATERIALS                                                        -->
+  <!-- ================================================================= -->
+
+  <material name="chassis_grey"><color rgba="0.35 0.37 0.40 1.0"/></material>
+  <material name="tyre_black">  <color rgba="0.10 0.10 0.10 1.0"/></material>
+  <material name="lidar_blue">  <color rgba="0.15 0.35 0.75 1.0"/></material>
+  <material name="sensor_dark"> <color rgba="0.20 0.20 0.22 1.0"/></material>
+  <material name="accent_red">  <color rgba="0.80 0.15 0.15 1.0"/></material>
+
+  <!-- ================================================================= -->
+  <!--  BASE                                                             -->
+  <!-- ================================================================= -->
+
+  <link name="base_footprint"/>
+
+  <joint name="base_footprint_joint" type="fixed">
+    <parent link="base_footprint"/>
+    <child  link="base_link"/>
+    <origin xyz="0 0 ${wheel_radius}" rpy="0 0 0"/>
+  </joint>
+
+  <link name="base_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry><box size="${base_length} ${base_width} ${base_height}"/></geometry>
+      <material name="chassis_grey"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry><box size="${base_length} ${base_width} ${base_height}"/></geometry>
+    </collision>
+    <xacro:inertial_box mass="${base_mass}" x="${base_length}" y="${base_width}" z="${base_height}">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+    </xacro:inertial_box>
+  </link>
+
+  <!-- ================================================================= -->
+  <!--  WHEELS                                                           -->
+  <!-- ================================================================= -->
+  <!--
+    reflect_x: +1 front, -1 rear
+    reflect_y: +1 left,  -1 right
+    Continuous joints spin about the wheel's own Y axis; the visual cylinder is
+    rotated by PI/2 about X so its symmetry axis lines up with Y.
+  -->
+  <xacro:macro name="wheel" params="prefix reflect_x reflect_y">
+    <link name="${prefix}_wheel_link">
+      <visual>
+        <origin xyz="0 0 0" rpy="${PI/2} 0 0"/>
+        <geometry><cylinder radius="${wheel_radius}" length="${wheel_width}"/></geometry>
+        <material name="tyre_black"/>
+      </visual>
+      <collision>
+        <origin xyz="0 0 0" rpy="${PI/2} 0 0"/>
+        <geometry><cylinder radius="${wheel_radius}" length="${wheel_width}"/></geometry>
+      </collision>
+      <xacro:inertial_cylinder mass="${wheel_mass}" radius="${wheel_radius}" length="${wheel_width}">
+        <origin xyz="0 0 0" rpy="${PI/2} 0 0"/>
+      </xacro:inertial_cylinder>
+    </link>
+
+    <joint name="${prefix}_wheel_joint" type="continuous">
+      <parent link="base_link"/>
+      <child  link="${prefix}_wheel_link"/>
+      <origin xyz="${reflect_x * half_base} ${reflect_y * half_track} ${-base_height/2}" rpy="0 0 0"/>
+      <axis xyz="0 1 0"/>
+      <dynamics damping="0.01" friction="0.001"/>
+    </joint>
+  </xacro:macro>
+
+  <xacro:wheel prefix="front_left"  reflect_x="1"  reflect_y="1"/>
+  <xacro:wheel prefix="front_right" reflect_x="1"  reflect_y="-1"/>
+  <xacro:wheel prefix="rear_left"   reflect_x="-1" reflect_y="1"/>
+  <xacro:wheel prefix="rear_right"  reflect_x="-1" reflect_y="-1"/>
+
+  <!-- ================================================================= -->
+  <!--  IMU  (on the ESP32-S3 control board, 6-axis)                     -->
+  <!-- ================================================================= -->
+  <!-- Named imu_frame, NOT imu_link, because that is the frame_id the firmware
+       stamps on /imu (verified 2026-08-31). The board is a fixed boundary we do
+       not control, so the URDF matches it rather than the _link convention.
+       Rename this and robot_localization's IMU lookup fails. -->
+
+
+  <link name="imu_frame">
+    <visual>
+      <geometry><box size="0.015 0.015 0.004"/></geometry>
+      <material name="accent_red"/>
+    </visual>
+    <xacro:inertial_box mass="0.005" x="0.015" y="0.015" z="0.004">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+    </xacro:inertial_box>
+  </link>
+
+  <joint name="imu_joint" type="fixed">
+    <parent link="base_link"/>
+    <child  link="imu_frame"/>
+    <origin xyz="${imu_xyz}" rpy="0 0 0"/>
+  </joint>
+
+  <!-- ================================================================= -->
+  <!--  MS200 LIDAR                                                      -->
+  <!-- ================================================================= -->
+  <!-- Named laser_frame, NOT laser_link - the firmware stamps laser_frame on /scan
+       (verified 2026-08-31). Same reasoning as imu_frame above. Rename it and
+       slam_toolbox/Nav2 drop every scan with "no transform from laser_frame".
+
+       The MS200 is wired to the ESP32, so /scan arrives over micro-ROS - there is
+       no separate lidar driver to launch. Verified geometry: 360 points over
+       +/-pi, 1 deg increment, range 0.12-8.0 m, ~10.8 Hz, BEST_EFFORT QoS.
+       time_increment and scan_time are both 0.0, so no motion-distortion
+       correction is possible. -->
+
+  <link name="laser_frame">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry><cylinder radius="0.0375" length="0.040"/></geometry>
+      <material name="lidar_blue"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry><cylinder radius="0.0375" length="0.040"/></geometry>
+    </collision>
+    <xacro:inertial_cylinder mass="0.100" radius="0.0375" length="0.040">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+    </xacro:inertial_cylinder>
+  </link>
+
+  <joint name="laser_joint" type="fixed">
+    <parent link="base_link"/>
+    <child  link="laser_frame"/>
+    <origin xyz="${lidar_xyz}" rpy="0 0 0"/>
+  </joint>
+
+  <!-- ================================================================= -->
+  <!--  2-DOF CAMERA GIMBAL                                              -->
+  <!-- ================================================================= -->
+  <!--  gimbal_yaw_joint   = Yahboom jq1_Joint (servo 1)
+        gimbal_pitch_joint = Yahboom jq2_Joint (servo 2)
+        Limits are the usual +/-90 deg of a hobby PWM servo - confirm against
+        your servo's real travel before commanding it.                       -->
+
+  <link name="gimbal_base_link">
+    <visual>
+      <geometry><box size="0.030 0.030 0.020"/></geometry>
+      <material name="sensor_dark"/>
+    </visual>
+    <xacro:inertial_box mass="0.030" x="0.030" y="0.030" z="0.020">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+    </xacro:inertial_box>
+  </link>
+
+  <joint name="gimbal_base_joint" type="fixed">
+    <parent link="base_link"/>
+    <child  link="gimbal_base_link"/>
+    <origin xyz="${gimbal_xyz}" rpy="0 0 0"/>
+  </joint>
+
+  <link name="gimbal_yaw_link">
+    <visual>
+      <geometry><box size="0.028 0.028 0.026"/></geometry>
+      <material name="sensor_dark"/>
+    </visual>
+    <xacro:inertial_box mass="0.025" x="0.028" y="0.028" z="0.026">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+    </xacro:inertial_box>
+  </link>
+
+  <joint name="gimbal_yaw_joint" type="revolute">
+    <parent link="gimbal_base_link"/>
+    <child  link="gimbal_yaw_link"/>
+    <origin xyz="0 0 0.023" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="${-PI/2}" upper="${PI/2}" effort="1.5" velocity="3.0"/>
+  </joint>
+
+  <link name="gimbal_pitch_link">
+    <visual>
+      <geometry><box size="0.026 0.032 0.024"/></geometry>
+      <material name="sensor_dark"/>
+    </visual>
+    <xacro:inertial_box mass="0.025" x="0.026" y="0.032" z="0.024">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+    </xacro:inertial_box>
+  </link>
+
+  <joint name="gimbal_pitch_joint" type="revolute">
+    <parent link="gimbal_yaw_link"/>
+    <child  link="gimbal_pitch_link"/>
+    <origin xyz="0 0 0.022" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="${-PI/2}" upper="${PI/2}" effort="1.5" velocity="3.0"/>
+  </joint>
+
+  <!-- 2 MP camera carried by the gimbal -->
+  <link name="camera_link">
+    <visual>
+      <geometry><box size="0.010 0.024 0.024"/></geometry>
+      <material name="accent_red"/>
+    </visual>
+    <xacro:inertial_box mass="0.015" x="0.010" y="0.024" z="0.024">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+    </xacro:inertial_box>
+  </link>
+
+  <joint name="camera_joint" type="fixed">
+    <parent link="gimbal_pitch_link"/>
+    <child  link="camera_link"/>
+    <origin xyz="0.015 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <!-- REP-103 optical frame: z forward, x right, y down.
+       image_pipeline / vision nodes expect THIS frame, not camera_link. -->
+  <link name="camera_optical_link"/>
+
+  <joint name="camera_optical_joint" type="fixed">
+    <parent link="camera_link"/>
+    <child  link="camera_optical_link"/>
+    <origin xyz="0 0 0" rpy="${-PI/2} 0 ${-PI/2}"/>
+  </joint>
+
+</robot>

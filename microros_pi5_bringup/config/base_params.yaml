@@ -1,0 +1,60 @@
+# Runtime parameters for the MicroROS-Pi5 bringup nodes.
+#
+# The topic names on the right of the ESP32 boundary are firmware-defined. Verify them on
+# your robot before changing anything else:
+#     ros2 topic list -t
+#     ros2 topic hz /odom_raw
+#
+# Yahboom's firmware course publishes /odom_raw (nav_msgs/Odometry) and /imu
+# (sensor_msgs/Imu), and subscribes /cmd_vel (geometry_msgs/Twist). Some image revisions
+# name the IMU topic /imu/data_raw instead - check yours.
+
+odom_republisher:
+  ros__parameters:
+    input_topic: odom_raw
+    output_topic: odom
+    odom_frame: odom
+    base_frame: base_footprint
+    # Set false when robot_localization is running - only one node may own this transform.
+    publish_tf: true
+    # The board's clock is not synced to the Pi. Overwrite the stamp locally, otherwise
+    # tf2 rejects the transform as "in the future".
+    stamp_with_ros_time: true
+    best_effort_input: true
+    #                        x      y      z    roll  pitch   yaw
+    pose_covariance_diagonal: [0.001, 0.001, 1.0e6, 1.0e6, 1.0e6, 0.03]
+    twist_covariance_diagonal: [0.001, 0.001, 1.0e6, 1.0e6, 1.0e6, 0.03]
+
+wheel_joint_publisher:
+  ros__parameters:
+    odom_topic: odom_raw
+    publish_rate: 30.0
+    # !! Keep these identical to the xacro properties in microros_pi5.urdf.xacro !!
+    wheel_radius: 0.0325
+    wheel_separation: 0.180
+    publish_gimbal_joints: true
+    best_effort_input: true
+
+keyboard_teleop:
+  ros__parameters:
+    output_topic: cmd_vel_raw
+    rate: 20.0               # Hz - published continuously, so the dead-man only trips on
+                             #      a real failure rather than between key repeats
+    speed: 0.15              # m/s   - gentle; cmd_vel_safety clamps to max_linear_x anyway
+    turn: 0.6                # rad/s
+    # Must exceed the terminal's auto-repeat delay (Ubuntu default ~0.66 s) or holding a
+    # key stutters. Check with: xset q | grep -A1 'auto repeat delay'
+    # Lower it to ~0.35 after `xset r rate 250 30` for a quicker stop on key release.
+    key_timeout: 0.75        # s
+
+cmd_vel_safety:
+  ros__parameters:
+    input_topic: cmd_vel_raw
+    output_topic: cmd_vel
+    rate: 20.0
+    max_linear_x: 0.5        # m/s   - raise once you trust the odometry calibration
+    max_linear_y: 0.0        # m/s   - 0 rejects lateral commands (this chassis cannot strafe)
+    max_angular_z: 2.0       # rad/s
+    max_linear_accel: 1.0    # m/s^2 - gentle enough not to brown out the 7.4 V pack
+    max_angular_accel: 3.0   # rad/s^2
+    timeout: 0.5             # s of silence on the input before ramping to a stop
